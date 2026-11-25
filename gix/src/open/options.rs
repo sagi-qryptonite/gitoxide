@@ -15,6 +15,7 @@ impl Default for Options {
             permissions: Default::default(),
             git_dir_trust: None,
             configure_related_repository: None,
+            config_overrides_by_trust: None,
             filter_config_section: None,
             lossy_config: false,
             lenient_config: true,
@@ -46,6 +47,7 @@ impl Options {
             permissions: self.permissions,
             git_dir_trust: self.git_dir_trust,
             configure_related_repository: self.configure_related_repository.clone(),
+            config_overrides_by_trust: self.config_overrides_by_trust.clone(),
             filter_config_section: self.filter_config_section,
             lossy_config: self.lossy_config,
             lenient_config: self.lenient_config,
@@ -109,6 +111,27 @@ impl Options {
     /// The configuration is marked with [source API][gix_config::Source::Api].
     pub fn config_overrides(mut self, values: impl IntoIterator<Item = impl Into<BString>>) -> Self {
         self.api_config_overrides = values.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Replace the configuration policy based on the repository's final trust level.
+    ///
+    /// The callback receives the configuration resolved during opening, including ordinary overrides.
+    /// Return assignments like `index.threads=1`, or an empty vector to leave that configuration as is.
+    /// Assignments are appended as [API configuration][gix_config::Source::Api] with a comment,
+    /// taking precedence over config files, CLI arguments, and environment overrides in ordinary lookups.
+    /// The usual section filters and key-specific rules still apply.
+    /// Any callback or assignment error fails the open.
+    ///
+    /// By default, [`Full`][gix_sec::Trust::Full] adds no overrides. [`Reduced`][gix_sec::Trust::Reduced]
+    /// disables object and delta caches, limits threads, and restricts selected transport and repository settings.
+    /// This policy runs after opening has selected the Git directory, object format, checkout, and trust level.
+    /// It is inherited by related repositories and run afresh for each open or reload.
+    pub fn config_overrides_by_trust(
+        mut self,
+        configure: impl Fn(gix_sec::Trust, &gix_config::File) -> Result<Vec<BString>> + Send + Sync + 'static,
+    ) -> Self {
+        self.config_overrides_by_trust = Some(Arc::new(configure));
         self
     }
 
@@ -298,6 +321,7 @@ impl Options {
         let trust = self.git_dir_trust.expect("initial trust has been determined");
         let current_dir = self.current_dir.take().expect("the opening CWD has been captured");
         let retain_inferred_worktree_when_bare = self.retain_inferred_worktree_when_bare;
+        let config_overrides_by_trust = self.config_overrides_by_trust.clone();
         let git_dir = anchored(git_dir, &current_dir);
         let inferred_worktree = inferred_worktree.map(|path| anchored(path, &current_dir));
         let ControlFlow::Continue(mut options) = configure(
@@ -315,6 +339,7 @@ impl Options {
         };
         // The callback can replace the entire options value.
         options.configure_related_repository.get_or_insert(configure);
+        options.config_overrides_by_trust = options.config_overrides_by_trust.or(config_overrides_by_trust);
         options.git_dir_trust.get_or_insert(trust);
         options.current_dir = Some(current_dir);
         options.use_repository_local_environment = false;
@@ -363,6 +388,7 @@ impl Options {
                 permissions: Permissions::default_for_level(level),
                 git_dir_trust: Some(RepositoryTrust::Precomputed(level)),
                 configure_related_repository: None,
+                config_overrides_by_trust: None,
                 retain_inferred_worktree_when_bare: false,
                 filter_config_section: None,
                 lossy_config: false,
@@ -381,6 +407,7 @@ impl Options {
                 permissions: Permissions::default_for_level(level),
                 git_dir_trust: Some(RepositoryTrust::Precomputed(level)),
                 configure_related_repository: None,
+                config_overrides_by_trust: None,
                 retain_inferred_worktree_when_bare: false,
                 filter_config_section: None,
                 bail_if_untrusted: false,
@@ -396,4 +423,39 @@ impl Options {
             },
         }
     }
+}
+
+pub(super) fn default_config_overrides(trust: gix_sec::Trust) -> Vec<BString> {
+    if trust == gix_sec::Trust::Full {
+        return Vec::new();
+    }
+    [
+        // Limit retained data and the number of workers that can allocate at once.
+        "core.deltaBaseCacheLimit=0",
+        "gitoxide.core.defaultPackCacheMemoryLimit=0",
+        "gitoxide.objects.cacheLimit=0",
+        "pack.threads=1",
+        "index.threads=1",
+        "checkout.workers=1",
+        // Require explicit permission for protocols that otherwise rely on user initiation.
+        "gitoxide.allow.protocolFromUser=false",
+        "protocol.ext.allow=never",
+        "http.sslVerify=true",
+        "gitoxide.http.sslNoVerify=false",
+        "http.followRedirects=false",
+        "gitoxide.credentials.terminalPrompt=false",
+        // Reduce implicit work outside the repository.
+        "core.useReplaceRefs=false",
+        "fetch.recurseSubmodules=false",
+        "submodule.recurse=false",
+        "fsmonitor.allowRemote=false",
+        // Request data verification where the corresponding Git settings are supported.
+        "fetch.fsckObjects=true",
+        "receive.fsckObjects=true",
+        "transfer.fsckObjects=true",
+        "index.skipHash=false",
+    ]
+    .into_iter()
+    .map(Into::into)
+    .collect()
 }

@@ -2962,6 +2962,13 @@ fn configure_related_repository_applies_to_linked_and_main_opens() -> TestResult
         return Ok(());
     };
     let repo = crate::restricted()
+        .config_overrides_by_trust(|_, config| {
+            Ok(if config.integer("core.abbrev")? == Some(12) {
+                vec!["core.abbrev=14".into()]
+            } else {
+                Vec::new()
+            })
+        })
         .configure_related_repository(|related, _| {
             assert!(related.git_dir.is_absolute(), "the target path can be used directly");
             match related.kind {
@@ -2982,8 +2989,8 @@ fn configure_related_repository_applies_to_linked_and_main_opens() -> TestResult
     let linked = repo.worktree_proxy_by_id("wt-a")?.expect("worktree wt-a").into_repo()?;
     assert_eq!(
         linked.config_snapshot().integer("core.abbrev"),
-        Some(12),
-        "the linked worktree sees the override"
+        Some(14),
+        "the linked worktree runs the inherited policy even when it receives replacement options"
     );
     let err = linked
         .main_repo()
