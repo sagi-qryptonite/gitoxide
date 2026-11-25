@@ -282,7 +282,6 @@ impl crate::Bundle {
             thread_limit,
             iteration_mode: _,
             index_version: index_kind,
-            alloc_limit_bytes,
             compression: _,
             shared_repository_permissions,
         }: Options,
@@ -313,7 +312,6 @@ impl crate::Bundle {
                     &mut index_file,
                     should_interrupt,
                     object_hash,
-                    alloc_limit_bytes,
                     pack_version,
                 )?;
                 drop(pack_entries_iter);
@@ -386,7 +384,6 @@ impl crate::Bundle {
                     &mut io::sink(),
                     should_interrupt,
                     object_hash,
-                    alloc_limit_bytes,
                     pack_version,
                 )?,
                 data_path: None,

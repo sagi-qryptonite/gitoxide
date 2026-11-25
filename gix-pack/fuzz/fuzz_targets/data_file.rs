@@ -7,8 +7,6 @@ use gix_pack_fuzz::{interrupt_flag, virtual_path};
 use libfuzzer_sys::fuzz_target;
 use std::hint::black_box;
 
-const ALLOC_LIMIT_BYTES: usize = 64 * 1024 * 1024;
-
 fn fuzz(input: &[u8]) -> Result<()> {
     let pack = match data::File::from_data(input, virtual_path(".pack"), gix_hash::Kind::Sha1) {
         Ok(pack) => pack,
@@ -16,8 +14,7 @@ fn fuzz(input: &[u8]) -> Result<()> {
             _ = black_box(err);
             return Ok(());
         }
-    }
-    .with_alloc_limit_bytes(Some(ALLOC_LIMIT_BYTES));
+    };
 
     _ = black_box(pack.version());
     _ = black_box(pack.path());

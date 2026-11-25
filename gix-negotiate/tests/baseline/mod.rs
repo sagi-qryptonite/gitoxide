@@ -59,12 +59,7 @@ fn run() -> TestResult {
             for use_cache in [false, true] {
                 let cache = use_cache
                     .then(|| {
-                        gix_commitgraph::at(
-                            store.store_ref().path().join("info"),
-                            store.store_ref().object_hash(),
-                            None,
-                        )
-                        .ok()
+                        gix_commitgraph::at(store.store_ref().path().join("info"), store.store_ref().object_hash()).ok()
                     })
                     .flatten();
                 let mut graph = gix_revwalk::Graph::new(&store, cache.as_ref());
